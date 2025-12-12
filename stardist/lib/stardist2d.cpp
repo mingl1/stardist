@@ -295,7 +295,11 @@ static PyObject* c_non_max_suppression_inds_old(PyObject *self, PyObject *args) 
 #ifdef _WIN32
 #pragma omp parallel for schedule(dynamic) reduction(+:count_suppressed)
 #else
+#ifdef __APPLE__
+#pragma omp parallel for collapse(2) reduction(+:count_suppressed)
+#else
 #pragma omp parallel for collapse(2) schedule(dynamic) reduction(+:count_suppressed)
+#endif
 #endif
       for (int jj=ys; jj<ye; jj++) for (int ii=xs; ii<xe; ii++) {
           // j is the id of the score-sorted polygon at coordinate (ii,jj)
@@ -340,7 +344,11 @@ static PyObject* c_non_max_suppression_inds_old(PyObject *self, PyObject *args) 
 
       // printf("%5d [%03d:%03d,%03d:%03d]\n",i,bbox_x1[i],bbox_x2[i],bbox_y1[i],bbox_y2[i]);
 
+#ifdef __APPLE__
+#pragma omp parallel for reduction(+:count_suppressed)
+#else
 #pragma omp parallel for schedule(dynamic) reduction(+:count_suppressed)
+#endif
       for (int j=i+1; j<n_polys; j++) {
         if (suppressed[j]) continue;
         // skip if bounding boxes are not even intersecting

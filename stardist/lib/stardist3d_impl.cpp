@@ -1176,6 +1176,19 @@ void _COMMON_non_maximum_suppression_sparse(
     }
     //  inner loop
     //  can be parallelized....
+#ifdef __APPLE__
+#pragma omp parallel for \
+  reduction(+:count_suppressed_pretest) reduction(+:count_suppressed_kernel) \
+  reduction(+:count_suppressed_rendered)                                \
+  reduction(+:count_call_kernel) reduction(+:count_call_render)         \
+  reduction(+:count_call_lower)                                         \
+  reduction(+:count_call_upper) reduction(+:count_call_convex)          \
+  reduction(+:count_kept_pretest) reduction(+:count_kept_convex)        \
+  reduction(+:timer_call_kernel) reduction(+:timer_call_convex)        \
+  reduction(+:timer_call_render) \
+  shared(curr_rendered)\
+  shared(suppressed)
+#else
 #pragma omp parallel for schedule(dynamic) \
   reduction(+:count_suppressed_pretest) reduction(+:count_suppressed_kernel) \
   reduction(+:count_suppressed_rendered)                                \
@@ -1187,6 +1200,7 @@ void _COMMON_non_maximum_suppression_sparse(
   reduction(+:timer_call_render) \
   shared(curr_rendered)\
   shared(suppressed) 
+#endif
 
     // for (int j=i+1; j<n_polys; j++) {
     //   if (suppressed[j])
@@ -1457,7 +1471,11 @@ void  _COMMON_polyhedron_to_label(const float* dist, const float* points,
 
 
     // loop over bounding box and label pixel if inside of the polyhedron
+#ifdef __APPLE__
+#pragma omp parallel for
+#else
 #pragma omp parallel for schedule(dynamic)
+#endif
     for (uint64_t z = std::max(0,bbox[0]); z <= (uint64_t) std::min(nz-1,bbox[1]); ++z) {
       for (uint64_t y = std::max(0,bbox[2]); y <= (uint64_t) std::min(ny-1,bbox[3]); ++y) {
         for (uint64_t x = std::max(0,bbox[4]); x <= (uint64_t) std::min(nx-1,bbox[5]); ++x) {
