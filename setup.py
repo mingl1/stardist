@@ -140,7 +140,7 @@ setup(
     ],
 
     install_requires=[
-        'csbdeep>=0.8.0',
+        'csbdeep>=0.8.2',
         # https://numpy.org/doc/2.3/dev/depending_on_numpy.html#adding-a-dependency-on-numpy
         'numpy<3; python_version>="3.9"',
         'scikit-image',
@@ -152,7 +152,7 @@ setup(
     ],
 
     extras_require={
-        "tf1":  ["csbdeep[tf1]>=0.8.0"],
+        "tf1":  ["csbdeep[tf1]>=0.8.2"],
         "test": [
             "pytest;        python_version< '3.7'",
             "pytest>=7.2.0; python_version>='3.7'",
