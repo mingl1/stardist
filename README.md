@@ -48,7 +48,7 @@ If you want to know more about the concepts and practical applications of StarDi
 
 ## Installation
 
-This package is compatible with Python 3.6 - 3.12.
+This package is compatible with Python 3.6 - 3.13.
 
 If you only want to use a StarDist plugin for a GUI-based software, please read [this](#plugins-for-other-software).
 
@@ -292,7 +292,7 @@ We made a plugin for the Python-based multi-dimensional image viewer [napari](ht
 
 ### QuPath
 
-Inspired by the Fiji plugin, [Pete Bankhead](https://github.com/petebankhead) made a custom implementation of StarDist 2D for [QuPath](https://qupath.github.io) to use pretrained models. Please see [this page](https://qupath.readthedocs.io/en/latest/docs/deep/stardist.html) for documentation and installation instructions.
+Inspired by the Fiji plugin, [Pete Bankhead](https://github.com/petebankhead) made a custom implementation of StarDist 2D for [QuPath](https://qupath.github.io) to use pretrained models. Please see [this page](https://qupath.readthedocs.io/en/stable/docs/deep/stardist.html) for documentation and installation instructions.
 
 ### Icy
 
