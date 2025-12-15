@@ -259,13 +259,13 @@ If you encounter an `ImportError: dlopen(...): symbol not found in flat namespac
 brew install libomp
 
 libomp_root=$(brew --prefix libomp)
-
-export CPPFLAGS="$CPPFLAGS -Xpreprocessor -fopenmp"
 export CFLAGS="$CFLAGS -I$libomp_root/include"
 export CXXFLAGS="$CXXFLAGS -I$libomp_root/include"
 export LDFLAGS="$LDFLAGS -Wl,-rpath,$libomp_root/lib -L$libomp_root/lib -lomp"
-pip install stardist --no-binary :all:
+
+pip install --no-binary stardist stardist
 ```
+
 ##### Apple Silicon
 
 As of StarDist 0.8.2, we provide `arm64` wheels that should work with [macOS on Apple Silicon](https://support.apple.com/en-us/HT211814) (M1 chip or newer). 
