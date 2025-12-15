@@ -1,5 +1,8 @@
 from pathlib import Path
-from pkg_resources import get_distribution
+try:
+    from importlib.metadata import requires
+except ImportError:
+    from importlib_metadata import requires
 from zipfile import ZipFile
 import numpy as np
 import tempfile
@@ -72,11 +75,23 @@ def _import(error=True):
 
 def _create_stardist_dependencies(outdir):
     from ruamel.yaml import YAML
+    from packaging.requirements import Requirement
     from tensorflow import __version__ as tf_version
     from . import __version__ as stardist_version
-    pkg_info = get_distribution("stardist")
     # dependencies that start with the name "bioimageio" will be added as conda dependencies
-    reqs_conda = [f"{req.project_name}{req.specifier}" for req in pkg_info.requires(extras=['bioimageio']) if req.key.startswith('bioimageio')]
+    reqs_conda = []
+    for req_str in requires("stardist"):
+        req = Requirement(req_str)
+        if (
+            req.marker is not None
+            # only include requirements that are for the "bioimageio" extra
+            and req.marker.evaluate({'extra': 'bioimageio'})
+            and not req.marker.evaluate({'extra': ''})
+            # and package name starts with "bioimageio"
+            and req.name.startswith('bioimageio')
+        ):
+            # https://packaging.pypa.io/en/stable/requirements.html
+            reqs_conda.append(f"{req.name}{req.specifier}")
     # only stardist and tensorflow as pip dependencies
     v_tf = Version(tf_version)
     reqs_pip = (f"stardist>={stardist_version}", f"tensorflow>={v_tf.major}.{v_tf.minor},<{v_tf.major+1}")
