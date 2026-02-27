@@ -75,7 +75,7 @@ def _non_maximum_suppression_old(coord, prob, grid=(1,1), b=2, nms_thresh=0.5, p
 
 
 def non_maximum_suppression(dist, prob, grid=(1,1), b=2, nms_thresh=0.5, prob_thresh=0.5,
-                            use_bbox=True, use_kdtree=True, verbose=False):
+                            use_bbox=True, use_kdtree=True, use_analytic_intersection=False, verbose=False):
     """Non-Maximum-Supression of 2D polygons
 
     Retains only polygons whose overlap is smaller than nms_thresh
@@ -123,6 +123,7 @@ def non_maximum_suppression(dist, prob, grid=(1,1), b=2, nms_thresh=0.5, prob_th
 
     inds = non_maximum_suppression_inds(dist, points.astype(np.int32, copy=False), scores=scores,
                                         use_bbox=use_bbox, use_kdtree=use_kdtree,
+                                        use_analytic_intersection=use_analytic_intersection,
                                         thresh=nms_thresh, verbose=verbose)
 
     if verbose:
@@ -133,7 +134,7 @@ def non_maximum_suppression(dist, prob, grid=(1,1), b=2, nms_thresh=0.5, prob_th
 
 
 def non_maximum_suppression_sparse(dist, prob, points, b=2, nms_thresh=0.5,
-                                   use_bbox=True, use_kdtree = True, verbose=False):
+                                   use_bbox=True, use_kdtree = True, use_analytic_intersection=False, verbose=False):
     """Non-Maximum-Supression of 2D polygons from a list of dists, probs (scores), and points
 
     Retains only polyhedra whose overlap is smaller than nms_thresh
@@ -174,7 +175,10 @@ def non_maximum_suppression_sparse(dist, prob, points, b=2, nms_thresh=0.5,
         print("non-maximum suppression...")
         t = time()
 
-    inds = non_maximum_suppression_inds(disti, pointsi, scores=probi, thresh=nms_thresh, use_kdtree = use_kdtree, verbose=verbose)
+    inds = non_maximum_suppression_inds(disti, pointsi, scores=probi, thresh=nms_thresh,
+                                        use_kdtree=use_kdtree,
+                                        use_analytic_intersection=use_analytic_intersection,
+                                        verbose=verbose)
 
     if verbose:
         print("keeping %s/%s polyhedra" % (np.count_nonzero(inds), len(inds)))
@@ -183,7 +187,8 @@ def non_maximum_suppression_sparse(dist, prob, points, b=2, nms_thresh=0.5,
     return pointsi[inds], probi[inds], disti[inds], inds_original[inds]
 
 
-def non_maximum_suppression_inds(dist, points, scores, thresh=0.5, use_bbox=True, use_kdtree = True, verbose=1):
+def non_maximum_suppression_inds(dist, points, scores, thresh=0.5, use_bbox=True,
+                                 use_kdtree=True, use_analytic_intersection=False, verbose=1):
     """
     Applies non maximum supression to ray-convex polygons given by dists and points
     sorted by scores and IoU threshold
@@ -222,7 +227,8 @@ def non_maximum_suppression_inds(dist, points, scores, thresh=0.5, use_bbox=True
                                       int(use_kdtree),
                                       int(use_bbox),
                                       int(verbose),
-                                      np.float32(thresh))
+                                      np.float32(thresh),
+                                      int(use_analytic_intersection))
 
     return inds
 

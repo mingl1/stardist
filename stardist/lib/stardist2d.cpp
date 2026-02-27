@@ -164,6 +164,66 @@ inline float poly_intersection_area(const ClipperLib::Path poly_a_path, const Cl
   return area_inter;
 }
 
+inline float cross2d(const float ay, const float ax, const float by, const float bx) {
+  return ay*bx - ax*by;
+}
+
+inline float ray_segment_distance(const float origin_y, const float origin_x,
+                                  const float dir_y, const float dir_x,
+                                  const float ay, const float ax,
+                                  const float by, const float bx) {
+  const float sy = by-ay;
+  const float sx = bx-ax;
+  const float denom = cross2d(dir_y, dir_x, sy, sx);
+  if (fabs(denom) <= 1.e-8f)
+    return -1.f;
+  const float wy = ay-origin_y;
+  const float wx = ax-origin_x;
+  const float t = cross2d(wy, wx, sy, sx) / denom;
+  if (t < 0.f)
+    return -1.f;
+  const float u = cross2d(wy, wx, dir_y, dir_x) / denom;
+  if (u < 0.f || u > 1.f)
+    return -1.f;
+  return t;
+}
+
+inline bool analytic_overlap_exceeds(const float *dist_i, const float *dist_j,
+                                     const float center_i_y, const float center_i_x,
+                                     const float center_j_y, const float center_j_x,
+                                     const float *ray_sin, const float *ray_cos,
+                                     const int n_rays, const float angle_step,
+                                     const float threshold_area) {
+  float area_inter = 0.f;
+  for (int k = 0; k < n_rays; ++k) {
+    const float dir_y = ray_sin[k];
+    const float dir_x = ray_cos[k];
+    float best_t = -1.f;
+    int e_prev = n_rays-1;
+    float ay = center_j_y + dist_j[e_prev] * ray_sin[e_prev];
+    float ax = center_j_x + dist_j[e_prev] * ray_cos[e_prev];
+    for (int e = 0; e < n_rays; ++e) {
+      const float by = center_j_y + dist_j[e] * ray_sin[e];
+      const float bx = center_j_x + dist_j[e] * ray_cos[e];
+      const float t = ray_segment_distance(center_i_y, center_i_x, dir_y, dir_x,
+                                           ay, ax, by, bx);
+      if (t >= 0.f && (best_t < 0.f || t < best_t))
+        best_t = t;
+      ay = by;
+      ax = bx;
+    }
+    if (best_t <= 0.f)
+      continue;
+    const float r = fmin(dist_i[k], best_t);
+    if (r <= 0.f)
+      continue;
+    area_inter += 0.5f * r * r * angle_step;
+    if (area_inter > threshold_area)
+      return true;
+  }
+  return false;
+}
+
 
 
 // polys.shape = (n_polys, 2, n_rays)
@@ -399,10 +459,11 @@ static PyObject* c_non_max_suppression_inds(PyObject *self, PyObject *args) {
 
   PyArrayObject *dist=NULL, *points_arr=NULL, *result=NULL;
   float threshold;
-  int verbose, use_kdtree, use_bbox;
+  int verbose, use_kdtree, use_bbox, use_analytic;
+  use_analytic = 0;
 
-  if (!PyArg_ParseTuple(args, "O!O!iiif", &PyArray_Type, &dist, &PyArray_Type, &points_arr ,
-                        &use_kdtree, &use_bbox, &verbose, &threshold))
+  if (!PyArg_ParseTuple(args, "O!O!iiif|i", &PyArray_Type, &dist, &PyArray_Type, &points_arr ,
+                        &use_kdtree, &use_bbox, &verbose, &threshold, &use_analytic))
     return NULL;
 
   const float * const points = (float*) PyArray_DATA(points_arr);
@@ -416,12 +477,19 @@ static PyObject* c_non_max_suppression_inds(PyObject *self, PyObject *args) {
   float * bbox_y1 = new float[n_polys];
   float * bbox_y2 = new float[n_polys];
   float * radius_outer = new float[n_polys];
+  float * radius_inner = new float[n_polys];
 
   float * areas = new float[n_polys];
   bool * suppressed = new bool[n_polys];
   ClipperLib::Path * poly_paths = new ClipperLib::Path[n_polys];
 
   const float ANGLE_PI = 2*M_PI/n_rays;
+  float * ray_sin = new float[n_rays];
+  float * ray_cos = new float[n_rays];
+  for (int k = 0; k < n_rays; ++k){
+    ray_sin[k] = sin(ANGLE_PI*k);
+    ray_cos[k] = cos(ANGLE_PI*k);
+  }
   
   int count_suppressed = 0;
 
@@ -434,7 +502,7 @@ static PyObject* c_non_max_suppression_inds(PyObject *self, PyObject *args) {
 
   if (verbose){
     printf("Non Maximum Suppression (2D) ++++ \n");
-    printf("NMS: n_polys    = %d \nNMS: n_rays     = %d  \nNMS: thresh     = %.3f \nNMS: use_bbox   = %d\nNMS: use_kdtree = %d\n", n_polys, n_rays, threshold, use_bbox, use_kdtree);
+    printf("NMS: n_polys    = %d \nNMS: n_rays     = %d  \nNMS: thresh     = %.3f \nNMS: use_bbox   = %d\nNMS: use_kdtree = %d\nNMS: use_analytic = %d\n", n_polys, n_rays, threshold, use_bbox, use_kdtree, use_analytic);
 #ifdef _OPENMP
     printf("NMS: using OpenMP with %d thread(s)\n", omp_get_max_threads());
 #endif
@@ -452,12 +520,13 @@ static PyObject* c_non_max_suppression_inds(PyObject *self, PyObject *args) {
     const float py = points[2*i];
     const float px = points[2*i+1];
     float max_radius_outer = 0;
+    float min_radius_inner = 0;
     for (int k =0; k<n_rays; k++) {
       // int y = *(int *)PyArray_GETPTR3(polys,i,0,k);
       // int x = *(int *)PyArray_GETPTR3(polys,i,1,k);
       const float d = *(float*)PyArray_GETPTR2(dist,i,k);  
-      const float y = (float)(py+d*sin(ANGLE_PI*k));
-      const float x = (float)(px+d*cos(ANGLE_PI*k));
+      const float y = (float)(py+d*ray_sin[k]);
+      const float x = (float)(px+d*ray_cos[k]);
 
 
       // printf("%d, %d,  ",y, x);
@@ -476,9 +545,10 @@ static PyObject* c_non_max_suppression_inds(PyObject *self, PyObject *args) {
       clip<<ClipperLib::IntPoint(x,y);
 
       max_radius_outer = fmax(d,max_radius_outer);
+      min_radius_inner = (k==0) ? d : fmin(d,min_radius_inner);
     }
-    // FIXME: make tighter
     radius_outer[i] = max_radius_outer;
+    radius_inner[i] = min_radius_inner;
     
     poly_paths[i] = clip;
     areas[i] = area_from_path(clip);
@@ -489,17 +559,18 @@ static PyObject* c_non_max_suppression_inds(PyObject *self, PyObject *args) {
   // build kdtree
 
   PointCloud2D<float> cloud;
-  float query_point[2];  
   nanoflann::SearchParams params;
   std::vector<std::pair<size_t,float>> results;
-  float max_dist = 0;
+  float * radius_outer_suffix_max = new float[n_polys+1];
 
   cloud.pts.resize(n_polys);
   for (long i = 0; i < n_polys; i++){
     cloud.pts[i].x = points[2*i];
     cloud.pts[i].y = points[2*i+1];
-    max_dist = (radius_outer[i]>max_dist)?radius_outer[i]:max_dist;
   }
+  radius_outer_suffix_max[n_polys] = 0;
+  for (int i = n_polys-1; i >= 0; --i)
+    radius_outer_suffix_max[i] = fmax(radius_outer[i], radius_outer_suffix_max[i+1]);
   
   // construct a kd-tree:
   typedef nanoflann::KDTreeSingleIndexAdaptor<
@@ -543,22 +614,31 @@ static PyObject* c_non_max_suppression_inds(PyObject *self, PyObject *args) {
       delete [] bbox_y1;
       delete [] bbox_y2;
       delete [] radius_outer;
+      delete [] radius_inner;
+      delete [] radius_outer_suffix_max;
+      delete [] ray_sin;
+      delete [] ray_cos;
       PyErr_SetString(PyExc_KeyboardInterrupt, "interrupted");
       return Py_None;
     }
     // printf("%.2f %.2f\n",points[2*i],points[2*i+1]);
 
-    if (use_kdtree)
-      // compute neighbors
-      size_t n_matches = index.radiusSearch(&points[2*i],
-                         (max_dist+radius_outer[i])*(max_dist+radius_outer[i]),
-                                          results, params);
-    else{
+    if (use_kdtree){
+      results.clear();
+      const float search_radius = radius_outer[i] + radius_outer_suffix_max[i+1];
+      if (search_radius > 0)
+        index.radiusSearch(&points[2*i],
+                           search_radius*search_radius,
+                           results, params);
+    } else {
+      results.clear();
       results.resize(n_polys-i);
       for (size_t n = 0; n < results.size(); ++n)
         results[n].first = i+n;
     }
     
+
+    const float * const dist_i_ptr = (float*)PyArray_GETPTR2(dist,i,0);
 
     // inner loop 
     // remove  schedule(dynamic) on OSX as it leads to segfaults sometimes (TODO)
@@ -567,7 +647,7 @@ static PyObject* c_non_max_suppression_inds(PyObject *self, PyObject *args) {
 #else
 #pragma omp parallel for schedule(dynamic) reduction(+:count_suppressed)   shared(suppressed)
 #endif
-    
+
     for (size_t neigh=0; neigh<results.size(); neigh++) {
     // for (int j=i+1; j<n_polys; j++) {
 
@@ -576,15 +656,44 @@ static PyObject* c_non_max_suppression_inds(PyObject *self, PyObject *args) {
       
       if ((suppressed[j]) || (j<=i))
         continue;
+
+      const float cy = points[2*i] - points[2*j];
+      const float cx = points[2*i+1] - points[2*j+1];
+      const float dist2 = cy*cy + cx*cx;
+
+      const float rsum = radius_outer[i] + radius_outer[j];
+      if (dist2 > rsum*rsum)
+        continue;
+
+      const float inner2 = radius_inner[i] * radius_inner[i];
+      if (dist2 < inner2){
+        count_suppressed +=1;
+#pragma omp atomic write
+        suppressed[j] = true;
+        continue;
+      }
       
       // skip if bounding boxes are not even intersecting
       if ((use_bbox) && (!bbox_intersect(bbox_x1[i], bbox_x2[i], bbox_y1[i], bbox_y2[i], bbox_x1[j], bbox_x2[j], bbox_y1[j], bbox_y2[j])))
         continue;
 
-      const float area_inter = poly_intersection_area(poly_paths[i], poly_paths[j]);
-      const float overlap = area_inter / fmin( areas[i]+1.e-10, areas[j]+1.e-10 );
-      if (overlap > threshold){
+      bool suppress = false;
+      const float min_area = fmin(areas[i]+1.e-10f, areas[j]+1.e-10f);
+      if (use_analytic) {
+        const float * const dist_j_ptr = (float*)PyArray_GETPTR2(dist,j,0);
+        suppress = analytic_overlap_exceeds(dist_i_ptr, dist_j_ptr,
+                                            points[2*i], points[2*i+1],
+                                            points[2*j], points[2*j+1],
+                                            ray_sin, ray_cos,
+                                            n_rays, ANGLE_PI,
+                                            threshold * min_area);
+      } else {
+        const float area_inter = poly_intersection_area(poly_paths[i], poly_paths[j]);
+        suppress = (area_inter / min_area) > threshold;
+      }
+      if (suppress){
         count_suppressed +=1;
+#pragma omp atomic write
         suppressed[j] = true;
           
       }
@@ -615,6 +724,10 @@ static PyObject* c_non_max_suppression_inds(PyObject *self, PyObject *args) {
   delete [] bbox_y1;
   delete [] bbox_y2;
   delete [] radius_outer;
+  delete [] radius_inner;
+  delete [] radius_outer_suffix_max;
+  delete [] ray_sin;
+  delete [] ray_cos;
 
   return PyArray_Return(result);
 }
