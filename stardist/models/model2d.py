@@ -5,18 +5,42 @@ import warnings
 import math
 from tqdm import tqdm
 
-from csbdeep.models import BaseConfig
-from csbdeep.internals.blocks import unet_block
+try:
+    from csbdeep.models import BaseConfig
+    from csbdeep.internals.blocks import unet_block
+    from csbdeep.utils.tf import (
+        keras_import, IS_TF_1, CARETensorBoard, CARETensorBoardImage,
+        IS_KERAS_3_PLUS, BACKEND as K,
+    )
+    keras = keras_import()
+    Input, Conv2D, MaxPooling2D = keras_import('layers', 'Input', 'Conv2D', 'MaxPooling2D')
+    Model = keras_import('models', 'Model')
+    _HAS_TF = True
+except (ImportError, RuntimeError):
+    _HAS_TF = False
+    IS_TF_1 = False
+    IS_KERAS_3_PLUS = False
+
+    class BaseConfig:
+        """Minimal BaseConfig fallback used when TensorFlow/csbdeep is not available."""
+        def __init__(self, axes='YX', n_channel_in=1, n_channel_out=1, **kwargs):
+            self.axes = axes
+            self.n_channel_in = n_channel_in
+            self.n_channel_out = n_channel_out
+            self.n_dim = sum(a in 'XYZ' for a in axes.upper())
+            self.__dict__.update(kwargs)
+
+        def update_parameters(self, allow_new, **kwargs):
+            for k, v in kwargs.items():
+                if allow_new or hasattr(self, k):
+                    setattr(self, k, v)
+
 from csbdeep.utils import _raise, backend_channels_last, axes_check_and_normalize, axes_dict
-from csbdeep.utils.tf import keras_import, IS_TF_1, CARETensorBoard, CARETensorBoardImage, IS_KERAS_3_PLUS, BACKEND as K
+
 from skimage.segmentation import clear_border
 from skimage.measure import regionprops
 from scipy.ndimage import zoom
 from packaging.version import Version
-
-keras = keras_import()
-Input, Conv2D, MaxPooling2D = keras_import('layers', 'Input', 'Conv2D', 'MaxPooling2D')
-Model = keras_import('models', 'Model')
 
 from .base import StarDistBase, StarDistDataBase, _tf_version_at_least
 from ..sample_patches import sample_patches
@@ -225,7 +249,8 @@ class Config2D(BaseConfig):
             raise ValueError("backbone '%s' not supported." % self.backbone)
 
         # net_mask_shape not needed but kept for legacy reasons
-        if backend_channels_last():
+        _channels_last = backend_channels_last() if _HAS_TF else True
+        if _channels_last:
             self.net_input_shape       = None,None,self.n_channel_in
             self.net_mask_shape        = None,None,1
         else:
@@ -250,7 +275,8 @@ class Config2D(BaseConfig):
         self.train_tensorboard         = True
         # the parameter 'min_delta' was called 'epsilon' for keras<=2.1.5
         # keras.__version__ was removed in tensorflow 2.13.0
-        min_delta_key = 'epsilon' if Version(getattr(keras, '__version__', '9.9.9'))<=Version('2.1.5') else 'min_delta'
+        _keras_version = getattr(keras, '__version__', '9.9.9') if _HAS_TF else '9.9.9'
+        min_delta_key = 'epsilon' if Version(_keras_version) <= Version('2.1.5') else 'min_delta'
         self.train_reduce_lr           = {'factor': 0.5, 'patience': 40, min_delta_key: 0}
 
         self.use_gpu                   = False
