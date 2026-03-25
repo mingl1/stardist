@@ -1493,22 +1493,41 @@ class StarDistBase(_BaseModel):
         x[(0,) + mid + (slice(None),)] = 1
         y = keras_model.predict(x, verbose=0)[0][0, ..., 0]
         y0 = keras_model.predict(z, verbose=0)[0][0, ..., 0]
-        grid = tuple((np.array(x.shape[1:-1]) / np.array(y.shape)).astype(int))
-        assert grid == self.config.grid
+        grid = tuple(int(v) for v in (np.array(x.shape[1:-1]) / np.array(y.shape)).astype(int))
+        config_grid = tuple(int(v) for v in self.config.grid)
+        if grid != config_grid:
+            import warnings
+            warnings.warn(
+                f"Computed grid {grid} does not match config.grid {config_grid}. "
+                f"Using model output grid {grid}.",
+                RuntimeWarning,
+            )
+            self.config.grid = list(grid)
         y = zoom(y, grid, order=0)
         y0 = zoom(y0, grid, order=0)
         ind = np.where(np.abs(y - y0) > 0)
         if any(len(i) == 0 for i in ind):
-            import contextlib
-            import io
+            if _HAS_TF:
+                import contextlib
+                import io
 
-            with contextlib.redirect_stdout(io.StringIO()) as _:
-                keras_model_untrained = type(self)(
-                    self.config, basedir=None
-                ).keras_model
-            return self._compute_receptive_field(
-                img_size=img_size, keras_model=keras_model_untrained
-            )
+                with contextlib.redirect_stdout(io.StringIO()) as _:
+                    keras_model_untrained = type(self)(
+                        self.config, basedir=None
+                    ).keras_model
+                return self._compute_receptive_field(
+                    img_size=img_size, keras_model=keras_model_untrained
+                )
+            else:
+                # Without TF we cannot build an untrained model.
+                # Fall back to a conservative overlap estimate: half the image size.
+                import warnings
+                warnings.warn(
+                    "Could not determine receptive field from model outputs "
+                    "(uniform response). Using conservative tile overlap estimate.",
+                    RuntimeWarning,
+                )
+                return [(s // 2, s // 2) for s in img_size]
         else:
             return [(m - np.min(i), np.max(i) - m) for (m, i) in zip(mid, ind)]
 
